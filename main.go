@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -134,7 +135,11 @@ func main() {
 		fmt.Printf("Explanation URL: %s\n", renewalInfo.ExplanationURL)
 	}
 	if retryAfter != "" {
-		fmt.Printf("Retry-After:     %s\n", retryAfter)
+		if seconds, err := strconv.Atoi(retryAfter); err == nil {
+			fmt.Printf("Retry-After:     %s (%s)\n", retryAfter, time.Duration(seconds)*time.Second)
+		} else {
+			fmt.Printf("Retry-After:     %s\n", retryAfter)
+		}
 	}
 
 	// Also print raw JSON

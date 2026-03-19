@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"io"
 	"math/big"
@@ -44,19 +45,23 @@ type Window struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <certificate-serial-number> [acme-directory-url]\n", os.Args[0])
+	directoryURL := flag.String("directory", letsEncryptDirectory, "ACME directory URL")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <certificate-serial-number>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\nThe serial number should be in hex (colon-separated or plain).\n")
-		fmt.Fprintf(os.Stderr, "Example: %s 04:ab:cd:ef:12:34 \n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s 04abcdef1234\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Example: %s 04:ab:cd:ef:12:34\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Example: %s 04abcdef1234\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Flags:\n")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if flag.NArg() < 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	serialHex := os.Args[1]
-	directoryURL := letsEncryptDirectory
-	if len(os.Args) >= 3 {
-		directoryURL = os.Args[2]
-	}
+	serialHex := flag.Arg(0)
 
 	// Normalize the serial: remove colons, leading zeros
 	serialHex = strings.ReplaceAll(serialHex, ":", "")
@@ -70,10 +75,10 @@ func main() {
 
 	fmt.Printf("Serial (hex): %s\n", serialHex)
 	fmt.Printf("Serial (dec): %s\n", serialInt.String())
-	fmt.Printf("Directory:    %s\n\n", directoryURL)
+	fmt.Printf("Directory:    %s\n\n", *directoryURL)
 
 	// Step 1: Fetch the ACME directory
-	dir, err := fetchDirectory(directoryURL)
+	dir, err := fetchDirectory(*directoryURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching ACME directory: %v\n", err)
 		os.Exit(1)
@@ -87,7 +92,7 @@ func main() {
 
 	// Step 2: Fetch the certificate via ACME cert URL
 	// Let's Encrypt certificate URL pattern: <directory-base>/acme/cert/<serial-hex>
-	certURL := buildCertURL(directoryURL, serialHex)
+	certURL := buildCertURL(*directoryURL, serialHex)
 	fmt.Printf("Fetching certificate from: %s\n", certURL)
 
 	certPEM, err := fetchCertificate(certURL)

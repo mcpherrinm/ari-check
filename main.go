@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -163,6 +164,33 @@ func main() {
 		}
 	}
 
+	// Recommended action
+	if renewalInfo.SuggestedWindow != nil {
+		now := time.Now()
+		w := renewalInfo.SuggestedWindow
+
+		fmt.Println()
+		if now.After(w.End) {
+			fmt.Println("Recommendation: Renew now (window has passed)")
+		} else if now.After(w.Start) {
+			fmt.Println("Recommendation: Renew now (within window)")
+		} else if retryAfter != "" {
+			if seconds, err := strconv.Atoi(retryAfter); err == nil {
+				recheckAt := now.Add(time.Duration(seconds) * time.Second)
+				if recheckAt.Before(w.Start) {
+					fmt.Printf("Recommendation: Re-check at %s (%s)\n", recheckAt.Format(time.RFC3339), relativeTime(recheckAt))
+				} else {
+					suggestedTime := randomTimeInWindow(w.Start, w.End)
+					fmt.Printf("Recommendation: Renew at %s (%s)\n", suggestedTime.Format(time.RFC3339), relativeTime(suggestedTime))
+				}
+			}
+		}
+		if now.Before(w.Start) && retryAfter == "" {
+			suggestedTime := randomTimeInWindow(w.Start, w.End)
+			fmt.Printf("Recommendation: Renew at %s (%s)\n", suggestedTime.Format(time.RFC3339), relativeTime(suggestedTime))
+		}
+	}
+
 	// Also print raw JSON
 	raw, _ := json.MarshalIndent(renewalInfo, "", "  ")
 	fmt.Printf("\nRaw JSON:\n%s\n", string(raw))
@@ -276,6 +304,12 @@ func fetchRenewalInfo(renewalInfoURL, certID string) (*RenewalInfo, string, erro
 	}
 
 	return &info, retryAfter, nil
+}
+
+func randomTimeInWindow(start, end time.Time) time.Time {
+	d := end.Sub(start)
+	n, _ := rand.Int(rand.Reader, big.NewInt(int64(d)))
+	return start.Add(time.Duration(n.Int64()))
 }
 
 func relativeTime(t time.Time) string {

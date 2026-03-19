@@ -149,8 +149,8 @@ func main() {
 
 	fmt.Println("\n=== Renewal Info ===")
 	if renewalInfo.SuggestedWindow != nil {
-		fmt.Printf("Suggested Window Start: %s\n", renewalInfo.SuggestedWindow.Start)
-		fmt.Printf("Suggested Window End:   %s\n", renewalInfo.SuggestedWindow.End)
+		fmt.Printf("Suggested Window Start: %s (%s)\n", renewalInfo.SuggestedWindow.Start, relativeTime(renewalInfo.SuggestedWindow.Start))
+		fmt.Printf("Suggested Window End:   %s (%s)\n", renewalInfo.SuggestedWindow.End, relativeTime(renewalInfo.SuggestedWindow.End))
 	}
 	if renewalInfo.ExplanationURL != "" {
 		fmt.Printf("Explanation URL: %s\n", renewalInfo.ExplanationURL)
@@ -276,4 +276,23 @@ func fetchRenewalInfo(renewalInfoURL, certID string) (*RenewalInfo, string, erro
 	}
 
 	return &info, retryAfter, nil
+}
+
+func relativeTime(t time.Time) string {
+	d := time.Until(t)
+	if d >= 0 {
+		return "in " + roundDuration(d).String()
+	}
+	return roundDuration(-d).String() + " ago"
+}
+
+func roundDuration(d time.Duration) time.Duration {
+	switch {
+	case d >= 24*time.Hour:
+		return d.Round(time.Hour)
+	case d >= time.Hour:
+		return d.Round(time.Minute)
+	default:
+		return d.Round(time.Second)
+	}
 }

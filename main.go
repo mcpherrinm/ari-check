@@ -125,8 +125,8 @@ func main() {
 
 	fmt.Printf("Certificate Subject: %s\n", cert.Subject.CommonName)
 	fmt.Printf("Certificate Issuer:  %s\n", cert.Issuer.CommonName)
-	fmt.Printf("Not Before:          %s\n", cert.NotBefore)
-	fmt.Printf("Not After:           %s\n", cert.NotAfter)
+	fmt.Printf("Not Before:          %s (%s)\n", cert.NotBefore, relativeTime(cert.NotBefore))
+	fmt.Printf("Not After:           %s (%s)\n", cert.NotAfter, relativeTime(cert.NotAfter))
 	if len(cert.DNSNames) > 0 {
 		fmt.Printf("DNS Names:           %s\n", strings.Join(cert.DNSNames, ", "))
 	}

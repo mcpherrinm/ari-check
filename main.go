@@ -30,7 +30,7 @@ type ACMEDirectory struct {
 	Meta       map[string]any    `json:"meta,omitempty"`
 }
 
-// RenewalInfo represents the ACME ARI response (RFC 8555 extension / draft-ietf-acme-ari).
+// RenewalInfo represents the ACME ARI response (RFC 9773).
 type RenewalInfo struct {
 	SuggestedWindow *Window `json:"suggestedWindow"`
 	ExplanationURL  string  `json:"explanationURL,omitempty"`
@@ -119,7 +119,7 @@ func main() {
 
 	fmt.Printf("ARI CertID: %s\n", ariCertID)
 
-	renewalInfo, err := fetchRenewalInfo(dir.RenewalInfo, ariCertID)
+	renewalInfo, retryAfter, err := fetchRenewalInfo(dir.RenewalInfo, ariCertID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching renewal info: %v\n", err)
 		os.Exit(1)
@@ -132,6 +132,9 @@ func main() {
 	}
 	if renewalInfo.ExplanationURL != "" {
 		fmt.Printf("Explanation URL: %s\n", renewalInfo.ExplanationURL)
+	}
+	if retryAfter != "" {
+		fmt.Printf("Retry-After:     %s\n", retryAfter)
 	}
 
 	// Also print raw JSON
@@ -198,17 +201,22 @@ func parseCertificate(pemData []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// buildARICertID constructs the ARI CertID per draft-ietf-acme-ari.
+// buildARICertID constructs the ARI CertID per RFC 9773.
 // The CertID is: base64url(AKI) "." base64url(Serial)
-// where AKI is the Authority Key Identifier and Serial is the DER-encoded serial number.
+// where AKI is the Authority Key Identifier's keyIdentifier field and Serial
+// is the value bytes of the DER-encoded serial number (without tag/length).
 func buildARICertID(cert *x509.Certificate) (string, error) {
 	aki := cert.AuthorityKeyId
 	if len(aki) == 0 {
 		return "", fmt.Errorf("certificate has no Authority Key Identifier extension")
 	}
 
-	// Serial number as raw bytes (big-endian, no leading zero padding beyond what's needed for sign)
+	// Serial number as DER INTEGER value bytes. DER uses two's complement,
+	// so a positive integer with the high bit set needs a leading 0x00.
 	serialBytes := cert.SerialNumber.Bytes()
+	if len(serialBytes) > 0 && serialBytes[0]&0x80 != 0 {
+		serialBytes = append([]byte{0x00}, serialBytes...)
+	}
 
 	akiEncoded := base64.RawURLEncoding.EncodeToString(aki)
 	serialEncoded := base64.RawURLEncoding.EncodeToString(serialBytes)
@@ -216,28 +224,30 @@ func buildARICertID(cert *x509.Certificate) (string, error) {
 	return akiEncoded + "." + serialEncoded, nil
 }
 
-func fetchRenewalInfo(renewalInfoURL, certID string) (*RenewalInfo, error) {
+func fetchRenewalInfo(renewalInfoURL, certID string) (*RenewalInfo, string, error) {
 	url := renewalInfoURL + "/" + certID
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", url, err)
+		return nil, "", fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
+		return nil, "", fmt.Errorf("reading response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d: %s", url, resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("GET %s: status %d: %s", url, resp.StatusCode, string(body))
 	}
+
+	retryAfter := resp.Header.Get("Retry-After")
 
 	var info RenewalInfo
 	if err := json.Unmarshal(body, &info); err != nil {
-		return nil, fmt.Errorf("decoding renewal info: %w", err)
+		return nil, "", fmt.Errorf("decoding renewal info: %w", err)
 	}
 
-	return &info, nil
+	return &info, retryAfter, nil
 }

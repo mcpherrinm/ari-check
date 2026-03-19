@@ -46,35 +46,26 @@ type Window struct {
 
 func main() {
 	directoryURL := flag.String("directory", letsEncryptDirectory, "ACME directory URL")
+	serialFlag := flag.String("serial", "", "certificate serial number in hex (colon-separated or plain)")
+	certFlag := flag.String("cert", "", "path to PEM certificate file")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <certificate-serial-number>\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "\nThe serial number should be in hex (colon-separated or plain).\n")
-		fmt.Fprintf(os.Stderr, "Example: %s 04:ab:cd:ef:12:34\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s 04abcdef1234\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Flags:\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s -serial <hex> | -cert <path> [flags]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	if flag.NArg() < 1 {
+	if *serialFlag == "" && *certFlag == "" {
+		fmt.Fprintf(os.Stderr, "Error: one of -serial or -cert is required\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+	if *serialFlag != "" && *certFlag != "" {
+		fmt.Fprintf(os.Stderr, "Error: -serial and -cert are mutually exclusive\n")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	serialHex := flag.Arg(0)
-
-	// Normalize the serial: remove colons, leading zeros
-	serialHex = strings.ReplaceAll(serialHex, ":", "")
-
-	serialInt := new(big.Int)
-	_, ok := serialInt.SetString(serialHex, 16)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "Error: invalid hex serial number: %s\n", serialHex)
-		os.Exit(1)
-	}
-
-	fmt.Printf("Serial (hex): %s\n", serialHex)
-	fmt.Printf("Serial (dec): %s\n", serialInt.String())
 	fmt.Printf("Directory:    %s\n\n", *directoryURL)
 
 	// Step 1: Fetch the ACME directory
@@ -90,21 +81,46 @@ func main() {
 	}
 	fmt.Printf("RenewalInfo endpoint: %s\n\n", dir.RenewalInfo)
 
-	// Step 2: Fetch the certificate via ACME cert URL
-	// Let's Encrypt certificate URL pattern: <directory-base>/acme/cert/<serial-hex>
-	certURL := buildCertURL(*directoryURL, serialHex)
-	fmt.Printf("Fetching certificate from: %s\n", certURL)
+	// Step 2: Get the certificate, either from a local file or by fetching via serial
+	var cert *x509.Certificate
 
-	certPEM, err := fetchCertificate(certURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching certificate: %v\n", err)
-		os.Exit(1)
-	}
+	if *certFlag != "" {
+		certPEM, err := os.ReadFile(*certFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading certificate file: %v\n", err)
+			os.Exit(1)
+		}
+		cert, err = parseCertificate(certPEM)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing certificate: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		serialHex := strings.ReplaceAll(*serialFlag, ":", "")
 
-	cert, err := parseCertificate(certPEM)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing certificate: %v\n", err)
-		os.Exit(1)
+		serialInt := new(big.Int)
+		_, ok := serialInt.SetString(serialHex, 16)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Error: invalid hex serial number: %s\n", serialHex)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Serial (hex): %s\n", serialHex)
+		fmt.Printf("Serial (dec): %s\n", serialInt.String())
+
+		certURL := buildCertURL(*directoryURL, serialHex)
+		fmt.Printf("Fetching certificate from: %s\n", certURL)
+
+		certPEM, err := fetchCertificate(certURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error fetching certificate: %v\n", err)
+			os.Exit(1)
+		}
+		cert, err = parseCertificate(certPEM)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing certificate: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	fmt.Printf("Certificate Subject: %s\n", cert.Subject.CommonName)
